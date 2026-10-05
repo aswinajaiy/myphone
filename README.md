@@ -21,17 +21,18 @@ TrollStore only installs on certain iOS versions (14.0–16.6.1 and 17.0 at the 
 
 ## Building
 
-You need a Mac with Xcode 15 or later.
+You need a Mac with Xcode 16 or later.
 
-```sh
-brew install xcodegen ldid
-xcodegen generate            # creates DeviceHealth.xcodeproj
-open DeviceHealth.xcodeproj  # set your team, run on device (Limited mode)
-```
+1. Open `DeviceHealth.xcodeproj`.
+2. Under **Signing & Capabilities**, pick your team. Change the bundle ID if Xcode says it's taken.
+3. Run it on your phone. This gives you Limited mode.
+
+The project syncs with the `DeviceHealth/` folder, so any Swift file you add or delete there is picked up automatically.
 
 ### TrollStore build
 
 ```sh
+brew install ldid
 ./scripts/build-tipa.sh      # -> build/DeviceHealth.tipa
 ```
 
@@ -64,6 +65,7 @@ Each section is its own small view. Delete its line from `body` in `Views/Health
 ## Layout
 
 ```
+DeviceHealth.xcodeproj
 DeviceHealth/
   App/DeviceHealthApp.swift      TabView
   Private/IOKitBridge.swift      dlsym bridge to IOKit + IOPowerSources

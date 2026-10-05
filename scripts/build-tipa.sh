@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 # Builds an unsigned Release .app, fakesigns it with the private entitlements via ldid,
 # and packages it as build/DeviceHealth.tipa for TrollStore.
-# Requires: Xcode, xcodegen, ldid  (brew install xcodegen ldid)
+# Requires: Xcode 16+, ldid  (brew install ldid)
 set -euo pipefail
 cd "$(dirname "$0")/.."
-
-xcodegen generate
 
 xcodebuild \
   -project DeviceHealth.xcodeproj \
