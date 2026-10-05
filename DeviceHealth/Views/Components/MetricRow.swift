@@ -185,7 +185,7 @@ struct AccessBanner: View {
                 Label(snapshot.access.rawValue, systemImage: "lock.trianglebadge.exclamationmark")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.orange)
-                Text("The private battery registry wasn't readable, so health, cycle count, live watts and charger details are limited. Install the TrollStore build (see README) for full data.")
+                Text("iOS's sandbox blocks the private battery registry for this install, so health, cycle count, live watts and charger details aren't available. Charging speed is estimated from how fast the charge % rises instead. Full data needs the TrollStore build on a supported iOS version.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 if let err = snapshot.registryError {

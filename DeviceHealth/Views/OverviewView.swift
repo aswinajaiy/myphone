@@ -3,6 +3,7 @@ import SwiftUI
 /// Tab 1: high-level dashboard. Each card links to the tab or page with the details.
 struct OverviewView: View {
     @EnvironmentObject var model: HealthModel
+    @EnvironmentObject var monitor: ChargeMonitor
     @Binding var tab: AppTab
 
     var body: some View {
@@ -12,7 +13,7 @@ struct OverviewView: View {
                     NavigationLink {
                         BatteryDetailView()
                     } label: {
-                        BatteryCard(b: model.battery)
+                        BatteryCard(b: model.battery, estimate: monitor.estimate)
                     }
                     .buttonStyle(.plain)
 
@@ -85,6 +86,7 @@ private struct MiniStat: View {
 
 private struct BatteryCard: View {
     let b: BatterySnapshot
+    let estimate: ChargeRateEstimate?
 
     /// Only show the charging strip while power is actually flowing into the cell.
     private var isCharging: Bool {
@@ -105,22 +107,29 @@ private struct BatteryCard: View {
                 }
                 .frame(width: 92, height: 92)
 
-                Grid(alignment: .leading, horizontalSpacing: 20, verticalSpacing: 10) {
-                    GridRow {
-                        MiniStat(title: "Health", value: Fmt.percent(b.healthPercent, digits: 1),
-                                 tint: healthColor)
+                // Only show stats this install can read, so Limited mode doesn't fill up with dashes.
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading),
+                                    GridItem(.flexible(), alignment: .leading)],
+                          alignment: .leading, spacing: 10) {
+                    if b.healthPercent != nil {
+                        MiniStat(title: "Health", value: Fmt.percent(b.healthPercent, digits: 1), tint: healthColor)
+                    }
+                    if b.cycleCount != nil {
                         MiniStat(title: "Cycles", value: Fmt.int(b.cycleCount))
                     }
-                    GridRow {
+                    if b.temperatureC != nil {
                         MiniStat(title: "Temperature", value: Fmt.temp(b.temperatureC))
-                        MiniStat(title: "State", value: b.externalConnected == true ? "Plugged in" : "On battery")
+                    }
+                    MiniStat(title: "State", value: b.externalConnected == true ? "Plugged in" : "On battery")
+                    if !b.hasLiveTelemetry, let e = estimate {
+                        MiniStat(title: "Charge rate", value: Fmt.num(e.percentPerHour, 0, "%/h"))
                     }
                 }
                 Spacer(minLength: 0)
             }
 
             if isCharging {
-                ChargingStrip(b: b)
+                ChargingStrip(b: b, estimate: estimate)
             }
         }
     }
@@ -139,10 +148,12 @@ private struct BatteryCard: View {
 /// Charge %, live watts and estimated completion time, shown only while charging.
 private struct ChargingStrip: View {
     let b: BatterySnapshot
+    let estimate: ChargeRateEstimate?
 
     var body: some View {
-        // Prefer the PMU's measured input; fall back to what's going into the cell.
-        let watts = b.inputWatts ?? b.batteryWatts
+        // Prefer the PMU's measured input, then what's going into the cell, then the % estimate.
+        let measured = b.inputWatts ?? b.batteryWatts
+        let watts = measured ?? estimate?.watts
         HStack(spacing: 12) {
             Image(systemName: "bolt.fill")
                 .font(.title3)
@@ -156,7 +167,7 @@ private struct ChargingStrip: View {
             }
             Spacer()
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(Fmt.num(watts, 1))
+                Text((measured == nil && watts != nil ? "≈" : "") + Fmt.num(watts, 1))
                     .font(.system(.title2, design: .rounded).weight(.bold))
                     .monospacedDigit()
                     .contentTransition(.numericText())
@@ -168,10 +179,10 @@ private struct ChargingStrip: View {
     }
 
     private var completionText: String {
-        // The gauge reports 65535 while it's still estimating.
-        guard let m = b.timeToFull_min, m > 0, m < 65535 else { return "Estimating time to full…" }
+        guard let m = b.timeToFullEstimate(estimate) else { return "Estimating time to full…" }
         let eta = Date().addingTimeInterval(TimeInterval(m * 60))
-        return "Full by \(eta.formatted(date: .omitted, time: .shortened)) · \(Fmt.minutes(m)) left"
+        let approx = b.reportedTimeToFull_min == nil ? "~" : ""
+        return "Full by \(approx)\(eta.formatted(date: .omitted, time: .shortened)) · \(Fmt.minutes(m)) left"
     }
 }
 
@@ -268,5 +279,7 @@ private struct InterfaceRates: View {
 }
 
 #Preview {
-    OverviewView(tab: .constant(.overview)).environmentObject(HealthModel())
+    OverviewView(tab: .constant(.overview))
+        .environmentObject(HealthModel())
+        .environmentObject(ChargeMonitor())
 }

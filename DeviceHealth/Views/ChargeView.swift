@@ -9,15 +9,25 @@ struct ChargeView: View {
         let s = monitor.snapshot
         NavigationStack {
             List {
-                ChargeHeroSection(s: s)
+                ChargeHeroSection(s: s, estimate: monitor.estimate)
                 AccessBanner(snapshot: s)
+                if !s.hasLiveTelemetry {
+                    ChargeRateSection(s: s, estimate: monitor.estimate)
+                }
                 ChargeChartSection(samples: monitor.samples)
-                PowerFlowSection(s: s)
-                AdapterSection(s: s)
+                // Sections below need registry data; hide them when it isn't readable.
+                if s.hasLiveTelemetry {
+                    PowerFlowSection(s: s)
+                }
+                if s.access == .full || !s.adapter.isEmpty {
+                    AdapterSection(s: s)
+                }
                 if !s.adapter.pdProfiles.isEmpty {
                     PDProfilesSection(adapter: s.adapter)
                 }
-                ChargeControllerSection(s: s)
+                if s.access == .full {
+                    ChargeControllerSection(s: s)
+                }
                 SessionSection(monitor: monitor)
                 MonitorSettingsSection(monitor: monitor)
             }
@@ -31,11 +41,13 @@ struct ChargeView: View {
 
 private struct ChargeHeroSection: View {
     let s: BatterySnapshot
+    let estimate: ChargeRateEstimate?
 
     var body: some View {
-        // Prefer the PMU's measured input; fall back to what's going into the cell.
+        // Prefer the PMU's measured input, then what's going into the cell, then the % estimate.
         let measuredInput = s.inputWatts != nil
-        let watts = s.inputWatts ?? s.batteryWatts
+        let measured = s.inputWatts ?? s.batteryWatts
+        let watts = measured ?? estimate?.watts
         let amps = s.inputAmps ?? s.batteryAmps
         let volts = s.inputVolts ?? s.batteryVolts
         let connected = s.connection.isConnected
@@ -70,7 +82,7 @@ private struct ChargeHeroSection: View {
                     RingGauge(fraction: Double(s.percent ?? 0) / 100, tint: ringColor, lineWidth: 16) {
                         VStack(spacing: 2) {
                             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                                Text(Fmt.num(watts, 2))
+                                Text((measured == nil && watts != nil ? "≈" : "") + Fmt.num(watts, measured == nil ? 1 : 2))
                                     .font(.system(size: 48, weight: .bold, design: .rounded))
                                     .monospacedDigit()
                                     .contentTransition(.numericText())
@@ -89,8 +101,9 @@ private struct ChargeHeroSection: View {
                     }
                     .frame(width: 200, height: 200)
 
-                    Text(measuredInput ? "Measured input from charger" : "Battery power (input telemetry unavailable)")
+                    Text(powerCaption(measuredInput: measuredInput, measured: measured))
                         .font(.caption).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
                 }
                 .padding(16)
                 .frame(maxWidth: .infinity)
@@ -98,20 +111,82 @@ private struct ChargeHeroSection: View {
                             in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                    StatTile(title: "Current", value: Fmt.num(amps, 3), unit: "A",
-                             symbol: "bolt.horizontal", tint: .orange)
-                    StatTile(title: "Voltage", value: Fmt.num(volts, 2), unit: "V",
-                             symbol: "waveform.path.ecg", tint: .blue)
-                    StatTile(title: "Into battery", value: Fmt.num(s.batteryWatts, 2), unit: "W",
-                             symbol: "battery.100.bolt", tint: .green)
-                    StatTile(title: "Charger rating", value: Fmt.int(s.adapter.watts), unit: "W",
-                             symbol: "powerplug", tint: .purple)
+                    if s.hasLiveTelemetry {
+                        StatTile(title: "Current", value: Fmt.num(amps, 3), unit: "A",
+                                 symbol: "bolt.horizontal", tint: .orange)
+                        StatTile(title: "Voltage", value: Fmt.num(volts, 2), unit: "V",
+                                 symbol: "waveform.path.ecg", tint: .blue)
+                        StatTile(title: "Into battery", value: Fmt.num(s.batteryWatts, 2), unit: "W",
+                                 symbol: "battery.100.bolt", tint: .green)
+                    } else {
+                        // Fallback tiles derived from the charge-% rate.
+                        StatTile(title: "Charge rate", value: Fmt.num(estimate?.percentPerHour, 0), unit: "%/h",
+                                 symbol: "speedometer", tint: .orange)
+                        StatTile(title: "Time to full", value: Fmt.minutes(s.timeToFullEstimate(estimate)), unit: "",
+                                 symbol: "hourglass", tint: .blue)
+                        StatTile(title: "Est. current", value: Fmt.num(estimate?.mAhPerHour, 0), unit: "mA",
+                                 symbol: "battery.100.bolt", tint: .green)
+                    }
+                    if s.hasLiveTelemetry || s.adapter.watts != nil {
+                        StatTile(title: "Charger rating", value: Fmt.int(s.adapter.watts), unit: "W",
+                                 symbol: "powerplug", tint: .purple)
+                    } else {
+                        StatTile(title: "Gained", value: estimate.map { "+\($0.percentGained)" } ?? Fmt.dash, unit: "%",
+                                 symbol: "arrow.up.right", tint: .purple)
+                    }
                 }
             }
             .listRowInsets(EdgeInsets())
             .listRowBackground(Color.clear)
             .animation(.default, value: watts)
         }
+    }
+
+    private func powerCaption(measuredInput: Bool, measured: Double?) -> String {
+        if measuredInput { return "Measured input from charger" }
+        if measured != nil { return "Battery power (input telemetry unavailable)" }
+        guard s.isCharging == true, s.fullyCharged != true else { return "Not charging" }
+        if estimate?.watts != nil { return "Estimated from how fast the charge % rises" }
+        return "Measuring charge rate… needs a 2% rise"
+    }
+}
+
+// MARK: - Charge rate fallback
+
+/// Shown when the sandbox hides live current/voltage: everything here is derived from % ticks.
+private struct ChargeRateSection: View {
+    let s: BatterySnapshot
+    let estimate: ChargeRateEstimate?
+
+    var body: some View {
+        Section {
+            if let e = estimate {
+                MetricRow("Charge rate", Fmt.num(e.percentPerHour, 1, "%/h"),
+                          symbol: "speedometer", tint: .orange)
+                MetricRow("Est. charge current", e.mAhPerHour.map { "≈ " + Fmt.num($0, 0, "mA") } ?? Fmt.dash,
+                          detail: capacityDetail(e))
+                MetricRow("Est. power into battery", e.watts.map { "≈ " + Fmt.num($0, 1, "W") } ?? Fmt.dash,
+                          detail: "Assumes \(Fmt.num(ChargeRateEstimator.nominalVoltage, 2, "V")) nominal cell voltage")
+                MetricRow("Time to full", Fmt.minutes(s.timeToFullEstimate(e)),
+                          detail: s.reportedTimeToFull_min != nil ? "Reported by iOS" : "Estimated from charge rate")
+                MetricRow("Measured over", Fmt.duration(e.window), detail: "\(e.percentGained)% gained in that time")
+            } else if s.isCharging == true, s.fullyCharged != true {
+                Label("Measuring… the rate appears after the charge rises 2%.", systemImage: "hourglass")
+                    .foregroundStyle(.secondary)
+            } else {
+                Label("Plug in to measure charging speed.", systemImage: "powerplug")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            SectionHeader("Charge rate (estimated)", symbol: "speedometer", tint: .orange)
+        } footer: {
+            Text("iOS hides live current and voltage from this app, so these figures come from how quickly the charge % rises over the last 30 minutes. They settle after a few percent and lag sudden changes. Optimized Charging may pause at 80%.")
+        }
+    }
+
+    private func capacityDetail(_ e: ChargeRateEstimate) -> String {
+        guard let c = e.capacity_mAh else { return "Battery capacity unknown for this model" }
+        return "Based on \(c) mAh " + (e.capacityFromModelTable ? "(model spec)" : "(gas gauge)")
     }
 }
 
@@ -123,12 +198,17 @@ private struct ChargeChartSection: View {
     @State private var window: TimeInterval = 300
 
     var body: some View {
+        // Only offer metrics this install can actually read.
+        let available = ChartMetric.allCases.filter { m in samples.contains { $0.hasValue(for: m) } }
+        let shown = available.contains(metric) ? metric : (available.first ?? .percent)
         Section {
-            Picker("Metric", selection: $metric) {
-                ForEach(ChartMetric.allCases) { Text($0.rawValue).tag($0) }
+            if available.count > 1 {
+                Picker("Metric", selection: Binding(get: { shown }, set: { metric = $0 })) {
+                    ForEach(available) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
             }
-            .pickerStyle(.segmented)
-            ChargeChart(samples: samples, metric: metric, window: window)
+            ChargeChart(samples: samples, metric: shown, window: window)
             Picker("Window", selection: $window) {
                 Text("1 min").tag(TimeInterval(60))
                 Text("5 min").tag(TimeInterval(300))
@@ -273,13 +353,18 @@ private struct SessionSection: View {
                 MetricRow("Duration", Fmt.duration(ses.duration))
                 MetricRow("Charge", "\(Fmt.int(ses.startPercent, "%")) → \(Fmt.int(ses.currentPercent, "%"))",
                           detail: ses.percentGained.map { "+\($0)%" })
-                MetricRow("Energy from charger", Fmt.num(ses.energyIn_Wh, 2, "Wh"))
-                MetricRow("Energy into battery", Fmt.num(ses.energyIntoBattery_Wh, 2, "Wh"))
-                MetricRow("Charge into battery", Fmt.num(ses.chargeIntoBattery_mAh, 0, "mAh"))
-                MetricRow("Peak input", Fmt.num(ses.peakInputW, 2, "W"))
-                MetricRow("Average input", Fmt.num(ses.averageInputW, 2, "W"))
-                MetricRow("Peak battery current", Fmt.num(ses.peakBatteryA, 3, "A"))
-                MetricRow("Max battery temp", Fmt.temp(ses.maxTempC))
+                MetricRow("Average rate", Fmt.num(averageRate(ses), 1, "%/h"))
+                if monitor.snapshot.hasLiveTelemetry {
+                    MetricRow("Energy from charger", Fmt.num(ses.energyIn_Wh, 2, "Wh"))
+                    MetricRow("Energy into battery", Fmt.num(ses.energyIntoBattery_Wh, 2, "Wh"))
+                    MetricRow("Charge into battery", Fmt.num(ses.chargeIntoBattery_mAh, 0, "mAh"))
+                    MetricRow("Peak input", Fmt.num(ses.peakInputW, 2, "W"))
+                    MetricRow("Average input", Fmt.num(ses.averageInputW, 2, "W"))
+                    MetricRow("Peak battery current", Fmt.num(ses.peakBatteryA, 3, "A"))
+                }
+                if ses.maxTempC != nil {
+                    MetricRow("Max battery temp", Fmt.temp(ses.maxTempC))
+                }
             } else {
                 Label("Plug in to start a session.", systemImage: "powerplug")
                     .foregroundStyle(.secondary)
@@ -297,6 +382,11 @@ private struct SessionSection: View {
         .sheet(item: $exportURL) { item in
             ActivityView(items: [item.url])
         }
+    }
+
+    private func averageRate(_ ses: ChargeSession) -> Double? {
+        guard let gained = ses.percentGained, ses.duration >= 60 else { return nil }
+        return Double(gained) / (ses.duration / 3600)
     }
 }
 

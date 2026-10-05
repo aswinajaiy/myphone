@@ -45,6 +45,8 @@ final class ChargeMonitor: ObservableObject {
     @Published private(set) var snapshot = BatterySnapshot()
     @Published private(set) var samples: [ChargeSample] = []
     @Published private(set) var session: ChargeSession?
+    /// Charge-rate estimate from % ticks; the fallback when real telemetry is unavailable.
+    @Published private(set) var estimate: ChargeRateEstimate?
     @Published var interval: Double = 1 { didSet { restart() } }
     @Published var keepAwake = false { didSet { UIApplication.shared.isIdleTimerDisabled = keepAwake } }
 
@@ -52,8 +54,13 @@ final class ChargeMonitor: ObservableObject {
     var maxSamples = 7200
 
     private var timer: AnyCancellable?
+    private var estimator = ChargeRateEstimator()
+    private let machine: String
 
-    init() { start() }
+    init() {
+        machine = SystemInfo.identity().machine
+        start()
+    }
 
     func start() {
         guard timer == nil else { return }
@@ -75,6 +82,8 @@ final class ChargeMonitor: ObservableObject {
 
     func resetSession() {
         samples.removeAll()
+        estimator.reset()
+        estimate = nil
         session = snapshot.connection.isConnected ? newSession(snapshot) : nil
     }
 
@@ -93,6 +102,11 @@ final class ChargeMonitor: ObservableObject {
         if samples.count > maxSamples { samples.removeFirst(samples.count - maxSamples) }
 
         updateSession(with: s)
+
+        let charging = s.isCharging == true && s.fullyCharged != true
+        estimator.update(percent: s.percent, isCharging: charging, at: s.timestamp)
+        estimate = estimator.estimate(now: s.timestamp, currentPercent: s.percent,
+                                      capacity_mAh: s.designCapacity_mAh, machine: machine)
     }
 
     private func updateSession(with s: BatterySnapshot) {
