@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Entitlements for the TrollStore (.tipa) build. These are private entitlements that
+  only TrollStore / a jailbreak will honor; a normal Xcode/AltStore signature rejects them.
+  Applied with: ldid -SResources/TrollStore.entitlements DeviceHealth.app/DeviceHealth
+-->
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>com.personal.devicehealth</string>
+	<key>platform-application</key>
+	<true/>
+	<!-- Lifts the app container sandbox so IOKit property reads on AppleSmartBattery / the PMU are allowed. -->
+	<key>com.apple.private.security.no-sandbox</key>
+	<true/>
+	<!-- Lets MGCopyAnswer return protected identity keys. -->
+	<key>com.apple.private.MobileGestalt.AllowedProtectedKeys</key>
+	<array>
+		<string>SerialNumber</string>
+		<string>UniqueDeviceID</string>
+		<string>ModelNumber</string>
+		<string>RegionInfo</string>
+		<string>DeviceColor</string>
+		<string>ChipID</string>
+		<string>marketing-name</string>
+	</array>
+</dict>
+</plist>
