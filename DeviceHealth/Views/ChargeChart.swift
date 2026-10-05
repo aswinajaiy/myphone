@@ -61,14 +61,28 @@ struct ChargeChart: View {
     var body: some View {
         let pts = points
         if pts.isEmpty {
-            Text("No data yet")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 200)
+            VStack(spacing: 8) {
+                Image(systemName: "chart.line.uptrend.xyaxis")
+                    .font(.largeTitle)
+                    .foregroundStyle(.tertiary)
+                Text("Collecting samples…")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: 200)
         } else {
             Chart(pts) { p in
                 LineMark(x: .value("Time", p.time), y: .value(metric.unit, p.value))
                     .foregroundStyle(by: .value("Series", p.series))
                     .interpolationMethod(.monotone)
+                    .lineStyle(StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+            }
+            .chartForegroundStyleScale(range: [Color.orange, Color.green])
+            .chartYAxis {
+                AxisMarks(position: .leading) { _ in
+                    AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5, dash: [3, 3]))
+                    AxisValueLabel()
+                }
             }
             .chartYAxisLabel(metric.unit)
             .chartLegend(position: .top, alignment: .leading)

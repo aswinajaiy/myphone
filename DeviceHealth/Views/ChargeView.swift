@@ -21,6 +21,7 @@ struct ChargeView: View {
                 SessionSection(monitor: monitor)
                 MonitorSettingsSection(monitor: monitor)
             }
+            .listStyle(.insetGrouped)
             .navigationTitle("Charging")
         }
     }
@@ -37,39 +38,78 @@ private struct ChargeHeroSection: View {
         let watts = s.inputWatts ?? s.batteryWatts
         let amps = s.inputAmps ?? s.batteryAmps
         let volts = s.inputVolts ?? s.batteryVolts
+        let connected = s.connection.isConnected
+        let ringColor: Color = {
+            guard let p = s.percent else { return .secondary }
+            return connected ? .green : p <= 20 ? .red : p <= 40 ? .orange : .green
+        }()
 
         Section {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Label(s.connection.title, systemImage: s.connection.symbol)
-                        .font(.headline)
-                        .foregroundStyle(s.connection.isConnected ? Color.green : Color.secondary)
-                    Spacer()
-                    Text(Fmt.int(s.percent, "%"))
-                        .font(.headline.monospacedDigit())
-                }
-                Text(s.chargeStateText).font(.subheadline).foregroundStyle(.secondary)
+            VStack(spacing: 12) {
+                VStack(spacing: 14) {
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: s.connection.symbol)
+                            Text(s.connection.title)
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .lineLimit(1)
+                        .fixedSize()
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .foregroundStyle(connected ? Color.green : Color.secondary)
+                        .background((connected ? Color.green : Color.secondary).opacity(0.15), in: Capsule())
+                        .layoutPriority(1)
+                        Spacer()
+                        Text(s.chargeStateText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
 
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(Fmt.num(watts, 2))
-                        .font(.system(size: 56, weight: .bold, design: .rounded))
-                        .monospacedDigit()
-                        .contentTransition(.numericText())
-                    Text("W").font(.title2).foregroundStyle(.secondary)
-                }
-                Text(measuredInput ? "Measured input from charger" : "Battery power (input telemetry unavailable)")
-                    .font(.caption).foregroundStyle(.secondary)
+                    RingGauge(fraction: Double(s.percent ?? 0) / 100, tint: ringColor, lineWidth: 16) {
+                        VStack(spacing: 2) {
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text(Fmt.num(watts, 2))
+                                    .font(.system(size: 48, weight: .bold, design: .rounded))
+                                    .monospacedDigit()
+                                    .contentTransition(.numericText())
+                                    .minimumScaleFactor(0.6)
+                                    .lineLimit(1)
+                                Text("W").font(.title3.weight(.semibold)).foregroundStyle(.secondary)
+                            }
+                            HStack(spacing: 4) {
+                                Image(systemName: connected ? "bolt.fill" : "battery.100")
+                                Text(Fmt.int(s.percent, "%"))
+                            }
+                            .font(.headline.monospacedDigit())
+                            .foregroundStyle(ringColor)
+                        }
+                        .padding(.horizontal, 24)
+                    }
+                    .frame(width: 200, height: 200)
 
-                HStack(spacing: 10) {
-                    StatTile(title: "Current", value: Fmt.num(amps, 3), unit: "A", tint: .orange)
-                    StatTile(title: "Voltage", value: Fmt.num(volts, 2), unit: "V", tint: .blue)
+                    Text(measuredInput ? "Measured input from charger" : "Battery power (input telemetry unavailable)")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
-                HStack(spacing: 10) {
-                    StatTile(title: "Into battery", value: Fmt.num(s.batteryWatts, 2), unit: "W", tint: .green)
-                    StatTile(title: "Charger rating", value: Fmt.int(s.adapter.watts), unit: "W", tint: .purple)
+                .padding(16)
+                .frame(maxWidth: .infinity)
+                .background(Color(.secondarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                    StatTile(title: "Current", value: Fmt.num(amps, 3), unit: "A",
+                             symbol: "bolt.horizontal", tint: .orange)
+                    StatTile(title: "Voltage", value: Fmt.num(volts, 2), unit: "V",
+                             symbol: "waveform.path.ecg", tint: .blue)
+                    StatTile(title: "Into battery", value: Fmt.num(s.batteryWatts, 2), unit: "W",
+                             symbol: "battery.100.bolt", tint: .green)
+                    StatTile(title: "Charger rating", value: Fmt.int(s.adapter.watts), unit: "W",
+                             symbol: "powerplug", tint: .purple)
                 }
             }
-            .padding(.vertical, 6)
+            .listRowInsets(EdgeInsets())
+            .listRowBackground(Color.clear)
             .animation(.default, value: watts)
         }
     }
@@ -83,7 +123,7 @@ private struct ChargeChartSection: View {
     @State private var window: TimeInterval = 300
 
     var body: some View {
-        Section("Live") {
+        Section {
             Picker("Metric", selection: $metric) {
                 ForEach(ChartMetric.allCases) { Text($0.rawValue).tag($0) }
             }
@@ -96,6 +136,8 @@ private struct ChargeChartSection: View {
                 Text("1 hr").tag(TimeInterval(3600))
                 Text("All").tag(TimeInterval.greatestFiniteMagnitude)
             }
+        } header: {
+            SectionHeader("Live", symbol: "chart.xyaxis.line", tint: .pink)
         }
     }
 }
@@ -123,7 +165,7 @@ private struct PowerFlowSection: View {
             MetricRow("Battery share of input", Fmt.percent(efficiency, digits: 0))
             MetricRow("Battery temperature", Fmt.temp(s.temperatureC))
         } header: {
-            Text("Power flow")
+            SectionHeader("Power flow", symbol: "arrow.triangle.branch", tint: .yellow)
         } footer: {
             Text("\"From charger\" is the PMU's measured input (PowerTelemetryData). \"Into battery\" is cell voltage × cell current.")
         }
@@ -139,7 +181,7 @@ private struct AdapterSection: View {
             guard let v = a.voltage_mV, let i = a.current_mA else { return nil }
             return Double(v) * Double(i) / 1_000_000
         }()
-        Section("Charger / adapter") {
+        Section {
             MetricRow("Connection", s.connection.title, symbol: s.connection.symbol)
             MetricRow("Rated power", Fmt.int(a.watts, "W"))
             MetricRow("Negotiated voltage", Fmt.milli(a.voltage_mV, "V", digits: 2))
@@ -157,6 +199,8 @@ private struct AdapterSection: View {
             if !a.raw.isEmpty {
                 NavigationLink("All adapter fields") { RawDictView(title: "AdapterDetails", dict: a.raw) }
             }
+        } header: {
+            SectionHeader("Charger / adapter", symbol: "powerplug.fill", tint: .purple)
         }
     }
 }
@@ -179,7 +223,7 @@ private struct PDProfilesSection: View {
                 }
             }
         } header: {
-            Text("USB-PD source profiles")
+            SectionHeader("USB-PD source profiles", symbol: "cable.connector", tint: .blue)
         } footer: {
             Text("Power profiles the charger advertised. The checked one is in use.")
         }
@@ -191,7 +235,7 @@ private struct ChargeControllerSection: View {
 
     var body: some View {
         let c = s.charger
-        Section("Charge controller") {
+        Section {
             MetricRow("State", s.chargeStateText)
             MetricRow("Target charge current", Fmt.milli(c.chargingCurrent_mA, "A"))
             MetricRow("Target charge voltage", Fmt.milli(c.chargingVoltage_mV, "V"))
@@ -208,6 +252,8 @@ private struct ChargeControllerSection: View {
             if !s.telemetry.raw.isEmpty {
                 NavigationLink("All power telemetry") { RawDictView(title: "PowerTelemetryData", dict: s.telemetry.raw) }
             }
+        } header: {
+            SectionHeader("Charge controller", symbol: "slider.horizontal.3", tint: .orange)
         }
     }
 }
@@ -235,7 +281,8 @@ private struct SessionSection: View {
                 MetricRow("Peak battery current", Fmt.num(ses.peakBatteryA, 3, "A"))
                 MetricRow("Max battery temp", Fmt.temp(ses.maxTempC))
             } else {
-                Text("Plug in to start a session.").foregroundStyle(.secondary)
+                Label("Plug in to start a session.", systemImage: "powerplug")
+                    .foregroundStyle(.secondary)
             }
             Button {
                 if let url = monitor.exportCSV() { exportURL = ExportItem(url: url) }
@@ -245,7 +292,7 @@ private struct SessionSection: View {
             .disabled(monitor.samples.isEmpty)
             Button("Reset session & chart", role: .destructive) { monitor.resetSession() }
         } header: {
-            Text("Session")
+            SectionHeader("Session", symbol: "timer", tint: .green)
         }
         .sheet(item: $exportURL) { item in
             ActivityView(items: [item.url])
@@ -270,7 +317,7 @@ private struct MonitorSettingsSection: View {
     @ObservedObject var monitor: ChargeMonitor
 
     var body: some View {
-        Section("Monitor") {
+        Section {
             Picker("Sample every", selection: $monitor.interval) {
                 Text("0.5 s").tag(0.5)
                 Text("1 s").tag(1.0)
@@ -278,6 +325,12 @@ private struct MonitorSettingsSection: View {
                 Text("5 s").tag(5.0)
             }
             Toggle("Keep screen awake", isOn: $monitor.keepAwake)
+        } header: {
+            SectionHeader("Monitor", symbol: "gearshape.fill", tint: .gray)
         }
     }
+}
+
+#Preview {
+    ChargeView().environmentObject(ChargeMonitor())
 }
