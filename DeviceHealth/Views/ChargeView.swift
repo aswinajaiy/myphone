@@ -42,8 +42,13 @@ struct ChargeView: View {
 private struct ChargeHeroSection: View {
     let s: BatterySnapshot
     let estimate: ChargeRateEstimate?
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
+        // Wide windows put the gauge and the stat tiles side by side instead of stacking them.
+        let layout = sizeClass == .regular
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: 12))
+            : AnyLayout(VStackLayout(spacing: 12))
         // Prefer the PMU's measured input, then what's going into the cell, then the % estimate.
         let measuredInput = s.inputWatts != nil
         let measured = s.inputWatts ?? s.batteryWatts
@@ -57,7 +62,7 @@ private struct ChargeHeroSection: View {
         }()
 
         Section {
-            VStack(spacing: 12) {
+            layout {
                 VStack(spacing: 14) {
                     HStack {
                         HStack(spacing: 4) {

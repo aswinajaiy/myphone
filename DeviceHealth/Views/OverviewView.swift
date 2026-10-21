@@ -5,34 +5,60 @@ struct OverviewView: View {
     @EnvironmentObject var model: HealthModel
     @EnvironmentObject var monitor: ChargeMonitor
     @Binding var tab: AppTab
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 16) {
-                    NavigationLink {
-                        BatteryDetailView()
-                    } label: {
-                        BatteryCard(b: model.battery, estimate: monitor.estimate)
+                Group {
+                    if sizeClass == .regular {
+                        // Wide windows: battery on the left, CPU/memory/network stacked on the right.
+                        HStack(alignment: .top, spacing: 16) {
+                            batteryCard
+                            VStack(spacing: 16) {
+                                usageCards
+                                networkCard
+                            }
+                        }
+                        .frame(maxWidth: 1100)
+                    } else {
+                        VStack(spacing: 16) {
+                            batteryCard
+                            usageCards
+                            networkCard
+                        }
                     }
-                    .buttonStyle(.plain)
-
-                    HStack(spacing: 16) {
-                        Button { tab = .system } label: { CPUCard(model: model) }
-                            .buttonStyle(.plain)
-                        Button { tab = .system } label: { MemoryCard(m: model.memory) }
-                            .buttonStyle(.plain)
-                    }
-
-                    Button { tab = .network } label: { NetworkCard(model: model) }
-                        .buttonStyle(.plain)
                 }
                 .padding()
+                .frame(maxWidth: .infinity)
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Overview")
             .refreshable { model.refresh() }
         }
+    }
+
+    private var batteryCard: some View {
+        NavigationLink {
+            BatteryDetailView()
+        } label: {
+            BatteryCard(b: model.battery, estimate: monitor.estimate)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var usageCards: some View {
+        HStack(spacing: 16) {
+            Button { tab = .system } label: { CPUCard(model: model) }
+                .buttonStyle(.plain)
+            Button { tab = .system } label: { MemoryCard(m: model.memory) }
+                .buttonStyle(.plain)
+        }
+    }
+
+    private var networkCard: some View {
+        Button { tab = .network } label: { NetworkCard(model: model) }
+            .buttonStyle(.plain)
     }
 }
 

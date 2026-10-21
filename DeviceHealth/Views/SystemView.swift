@@ -4,16 +4,22 @@ import UIKit
 /// Tab 2: detailed CPU, memory and storage metrics, plus device info.
 struct SystemView: View {
     @EnvironmentObject var model: HealthModel
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var category: SystemCategory? = .cpu
 
     var body: some View {
+        if sizeClass == .regular {
+            splitView
+        } else {
+            stackView
+        }
+    }
+
+    /// Compact width: every section in one scrolling list.
+    private var stackView: some View {
         NavigationStack {
             List {
-                CPUSection(model: model)
-                MemorySection(m: model.memory)
-                StorageSection(s: model.storage)
-                ThermalSection(model: model)
-                DeviceSection(id: model.identity, uptime: model.uptime)
-                DisplaySection()
+                ForEach(SystemCategory.allCases.filter { $0 != .raw }) { section(for: $0) }
                 Section {
                     NavigationLink {
                         RawExplorerView(snapshot: model.battery)
@@ -27,6 +33,76 @@ struct SystemView: View {
             .listStyle(.insetGrouped)
             .navigationTitle("System")
             .refreshable { model.refresh() }
+        }
+    }
+
+    /// Regular width: category sidebar with the selected section beside it.
+    private var splitView: some View {
+        NavigationSplitView {
+            List(selection: $category) {
+                ForEach(SystemCategory.allCases) { c in
+                    Label(c.title, systemImage: c.symbol).tag(c)
+                }
+            }
+            .navigationTitle("System")
+        } detail: {
+            NavigationStack {
+                Group {
+                    switch category ?? .cpu {
+                    case .raw:
+                        RawExplorerView(snapshot: model.battery)
+                    case let c:
+                        List { section(for: c) }
+                            .listStyle(.insetGrouped)
+                            .navigationTitle(c.title)
+                            .refreshable { model.refresh() }
+                    }
+                }
+            }
+            // Fresh navigation stack whenever the category changes.
+            .id(category)
+        }
+    }
+
+    @ViewBuilder
+    private func section(for c: SystemCategory) -> some View {
+        switch c {
+        case .cpu: CPUSection(model: model)
+        case .memory: MemorySection(m: model.memory)
+        case .storage: StorageSection(s: model.storage)
+        case .thermal: ThermalSection(model: model)
+        case .device: DeviceSection(id: model.identity, uptime: model.uptime)
+        case .display: DisplaySection()
+        case .raw: EmptyView()
+        }
+    }
+}
+
+private enum SystemCategory: String, CaseIterable, Identifiable {
+    case cpu, memory, storage, thermal, device, display, raw
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .cpu: return "CPU"
+        case .memory: return "Memory"
+        case .storage: return "Storage"
+        case .thermal: return "Thermal & power"
+        case .device: return "Device"
+        case .display: return "Display"
+        case .raw: return "Raw IORegistry"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .cpu: return "cpu"
+        case .memory: return "memorychip"
+        case .storage: return "internaldrive"
+        case .thermal: return "thermometer.medium"
+        case .device: return "iphone"
+        case .display: return "sun.max.fill"
+        case .raw: return "list.bullet.indent"
         }
     }
 }
@@ -132,15 +208,47 @@ private struct DeviceSection: View {
 }
 
 private struct DisplaySection: View {
+    /// The screen hosting this view's window, which may not be the device's built-in display.
+    @State private var screen: UIScreen?
+
     var body: some View {
-        let screen = UIScreen.main
         Section {
-            MetricRow("Brightness", Fmt.percent(Double(screen.brightness) * 100))
-            MetricRow("Max refresh rate", "\(screen.maximumFramesPerSecond) Hz")
-            MetricRow("Native resolution", "\(Int(screen.nativeBounds.width)) × \(Int(screen.nativeBounds.height))")
-            MetricRow("Scale", Fmt.num(Double(screen.nativeScale), 2, "×"))
+            if let screen {
+                MetricRow("Brightness", Fmt.percent(Double(screen.brightness) * 100))
+                MetricRow("Max refresh rate", "\(screen.maximumFramesPerSecond) Hz")
+                MetricRow("Native resolution", "\(Int(screen.nativeBounds.width)) × \(Int(screen.nativeBounds.height))")
+                MetricRow("Scale", Fmt.num(Double(screen.nativeScale), 2, "×"))
+            } else {
+                MetricRow("Display", Fmt.dash)
+            }
         } header: {
             SectionHeader("Display", symbol: "sun.max.fill", tint: .yellow)
+        }
+        .background(WindowScreenReader { screen = $0 })
+    }
+}
+
+/// Reports the `UIScreen` of the window this view lives in, and again whenever it moves to another window.
+private struct WindowScreenReader: UIViewRepresentable {
+    let onChange: (UIScreen?) -> Void
+
+    func makeUIView(context: Context) -> ReaderView {
+        let view = ReaderView()
+        view.onChange = onChange
+        return view
+    }
+
+    func updateUIView(_ view: ReaderView, context: Context) {
+        view.onChange = onChange
+    }
+
+    final class ReaderView: UIView {
+        var onChange: ((UIScreen?) -> Void)?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            let screen = window?.windowScene?.screen
+            DispatchQueue.main.async { [weak self] in self?.onChange?(screen) }
         }
     }
 }
